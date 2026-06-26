@@ -53,7 +53,8 @@ export async function GET(
       }, SSE_TIMEOUT_MS)
 
       // Subscribe to pub/sub channel — events arrive instantly as ruflo publishes
-      await subscriber.subscribe(`activity:pubsub:${cid}`, (message) => {
+      await subscriber.subscribe(`activity:pubsub:${cid}`, (err, message) => {
+        if (err || !message) return
         send(message)
 
         // Close on terminal events
