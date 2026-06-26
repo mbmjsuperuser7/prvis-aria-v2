@@ -5,17 +5,12 @@
  * Server subscribes to Redis pub/sub channel activity:pubsub:{cid}.
  * Ruflo publishes to that channel on every pipeline event.
  * Events arrive instantly — no polling, no delay.
- *
- * Connection closes when:
- *   - Ruflo publishes a 'complete' or 'error' event
- *   - Browser disconnects
- *   - 5 minute timeout (safety valve)
  */
 
 import { NextRequest } from 'next/server'
 import { createSubscriber, getRedis } from '@/lib/redis'
 
-const SSE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const SSE_TIMEOUT_MS = 5 * 60 * 1000
 
 export async function GET(
   req: NextRequest,
@@ -32,14 +27,23 @@ export async function GET(
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
+      let closed = false
 
       function send(data: string) {
+        if (closed) return
         try {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`))
         } catch { /* client disconnected */ }
       }
 
-      // Replay any events already in the list (in case browser reconnects)
+      function close() {
+        if (closed) return
+        closed = true
+        subscriber.disconnect()
+        try { controller.close() } catch { /* already closed */ }
+      }
+
+      // Replay existing events on reconnect
       const existing = await redis.lrange(`activity:${cid}`, 0, -1)
       for (const entry of existing) {
         send(entry)
@@ -48,34 +52,26 @@ export async function GET(
       // Safety timeout
       const timeout = setTimeout(() => {
         send(JSON.stringify({ event: 'timeout', detail: 'Connection timed out' }))
-        subscriber.disconnect()
-        controller.close()
+        close()
       }, SSE_TIMEOUT_MS)
 
-      // Subscribe to pub/sub channel — events arrive instantly as ruflo publishes
-      await subscriber.subscribe(`activity:pubsub:${cid}`, (err, message) => {
-        if (err || !message) return
-        send(String(message))
-
-        // Close on terminal events
+      // Use on('message') — properly typed as (channel: string, message: string)
+      subscriber.on('message', (channel: string, message: string) => {
+        send(message)
         try {
           const parsed = JSON.parse(message)
           if (parsed.event === 'complete' || parsed.event === 'error') {
             clearTimeout(timeout)
-            // Small delay so browser receives the final event before close
-            setTimeout(() => {
-              subscriber.disconnect()
-              controller.close()
-            }, 200)
+            setTimeout(close, 200)
           }
-        } catch { /* non-JSON message — keep connection open */ }
+        } catch { /* non-JSON — keep open */ }
       })
 
-      // Clean up if browser disconnects
+      await subscriber.subscribe(`activity:pubsub:${cid}`)
+
       req.signal.addEventListener('abort', () => {
         clearTimeout(timeout)
-        subscriber.disconnect()
-        try { controller.close() } catch { /* already closed */ }
+        close()
       })
     },
   })
