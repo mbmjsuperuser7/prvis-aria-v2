@@ -55,7 +55,7 @@ export async function GET(
       // Subscribe to pub/sub channel — events arrive instantly as ruflo publishes
       await subscriber.subscribe(`activity:pubsub:${cid}`, (err, message) => {
         if (err || !message) return
-        send(message)
+        send(String(message))
 
         // Close on terminal events
         try {
