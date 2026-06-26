@@ -1,0 +1,360 @@
+# prvis-aria — Aria agent platform
+#
+# Stack:
+#   web (Next.js)       — frontend, CiD assembly, Kafka producer, Redis pub/sub SSE
+#   aria-orchestrator   — ruflo router, routes to α/γ/β Ollamas, tool execution
+#   aria-rag            — RAG ingestion + search (LLM calls as tool)
+#   aria-qdrant         — vector store (standards, playbooks, tools, ACiDF)
+#   aria-ccf            — KV cache warm (name-only prompts, tool registry)
+#   aria-audit          — Presidio anonymization, ACiDF write to disk
+#   aria-sandbox        — execution sandbox for β tool calls
+#   Kafka, Redis, Presidio, Guacamole — infrastructure
+#
+# Flow:
+#   Browser → web:3002 → Kafka(aria.requests)
+#   → aria-orchestrator → α/γ/β Ollama (LLM calls knowledge_search tool as needed)
+#   → aria-rag → Qdrant (on tool call)
+#   → Redis pub/sub(activity:{cid}) → web SSE → Browser (live activity)
+#   → Kafka(aria.results.tasks) → Redis(result:{taskId}) → Browser (final response)
+#   → Kafka(all topics) → aria-audit → Presidio → ACiDF (audit trail)
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+networks:
+  aria-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  redis-data:
+  kafka-data:
+  audit-data:
+  ccf-data:
+  qdrant-data:
+
+services:
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  redis:
+    <<: *defaults
+    image: redis:7-alpine
+    container_name: aria-redis
+    hostname: aria-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save 60 1
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: {memory: 640M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── Kafka ─────────────────────────────────────────────────────────────────────
+  kafka:
+    <<: *defaults
+    image: apache/kafka:3.7.0
+    container_name: aria-kafka
+    hostname: aria-kafka
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://aria-kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@aria-kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 4
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/aria-kafka/9092' && echo ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    deploy:
+      resources:
+        limits: {memory: 768M, cpus: "1.0"}
+    networks: [aria-internal]
+
+  # ── Presidio ──────────────────────────────────────────────────────────────────
+  presidio-analyzer:
+    <<: *defaults
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    container_name: aria-presidio-analyzer
+    hostname: aria-presidio-analyzer
+    deploy:
+      resources:
+        limits: {memory: 1G, cpus: "1.0"}
+    networks: [aria-internal]
+
+  presidio-anonymizer:
+    <<: *defaults
+    image: mcr.microsoft.com/presidio-anonymizer:latest
+    container_name: aria-presidio-anonymizer
+    hostname: aria-presidio-anonymizer
+    deploy:
+      resources:
+        limits: {memory: 512M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── ccf-init — copies CCF files to shared volume at startup ─────────────────────
+  ccf-init:
+    image: python:3.12-slim
+    container_name: aria-ccf-init
+    command: >
+      sh -c "cp /src/ccf/*.md /dst/ && echo 'CCF files copied' && ls /dst/"
+    volumes:
+      - ./aria-ccf/ccf:/src/ccf:ro
+      - ccf-data:/dst
+    restart: "no"
+    networks: [aria-internal]
+
+  # aria-intake removed — Next.js handles Kafka production and SSE directly
+
+  # ── aria-orchestrator v2 — ruflo-powered ─────────────────────────────────────
+  # Replaces: aria-orchestrator, aria-alpha, aria-gamma, aria-beta
+  # Single Node.js process with ruflo Thompson bandit routing to α/γ/β Ollamas
+  aria-orchestrator:
+    <<: *defaults
+    build: {context: ./aria-orchestrator-v2}
+    container_name: aria-orchestrator
+    hostname: aria-orchestrator
+    environment:
+      REDIS_URL:         "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP:   "aria-kafka:9092"
+      ALPHA_OLLAMA_URL:  ${ALPHA_URL:-http://192.168.1.9:11434}
+      ALPHA_MODEL:       ${ALPHA_MODEL:-qwen3:30b-a3b}
+      GAMMA_OLLAMA_URL:  ${GAMMA_URL:-http://192.168.1.9:11434}
+      GAMMA_MODEL:       ${GAMMA_MODEL:-qwen3:14b}
+      BETA_OLLAMA_URL:   ${BETA_URL:-http://192.168.1.9:11434}
+      BETA_MODEL:        ${BETA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
+      ROUTER_STATE_PATH: ".swarm/aria-router-state.json"
+      RAG_URL:           "http://aria-rag:8300"
+      RAG_TIMEOUT_MS:    "5000"
+      # Tool endpoints — used when executing tool calls
+      PROXMOX_URL:       ${PROXMOX_URL:-https://192.168.1.220:8006}
+      GUACAMOLE_URL:     "http://aria-guacamole:8080"
+      WAZUH_URL:         ${WAZUH_URL:-}
+      FLEET_URL:         ${FLEET_URL:-}
+      DEFECTDOJO_URL:    ${DEFECTDOJO_URL:-}
+      THEHIVE_URL:       ${THEHIVE_URL:-}
+      TAVILY_API_KEY:    ${TAVILY_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── aria-sandbox — ephemeral containers per CiD ───────────────────────────────
+  aria-sandbox:
+    <<: *defaults
+    build: {context: ./aria-sandbox}
+    container_name: aria-sandbox
+    hostname: aria-sandbox
+    environment:
+      SANDBOX_TEMPLATE_IMAGE: aria-sandbox-template:latest
+      SANDBOX_NETWORK:        prvis-aria_aria-internal
+      SANDBOX_MEM_LIMIT:      256m
+      SANDBOX_CPU_LIMIT:      "0.5"
+      EXEC_TIMEOUT_SECONDS:   "60"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits: {memory: 128M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  # ── aria-ccf — KV cache warm service ─────────────────────────────────────────
+  aria-ccf:
+    <<: *defaults
+    build: {context: ./aria-ccf}
+    container_name: aria-ccf
+    hostname: aria-ccf
+    environment:
+      REDIS_URL:        "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP:  "aria-kafka:9092"
+      CCF_DIR:          "/app/ccf"
+      AUDIT_DIR:        "/app/audit"
+      ALPHA_OLLAMA_URL: ${ALPHA_URL:-http://192.168.1.9:11434}
+      ALPHA_MODEL:      ${ALPHA_MODEL:-qwen3:30b-a3b}
+      GAMMA_OLLAMA_URL: ${GAMMA_URL:-http://192.168.1.9:11434}
+      GAMMA_MODEL:      ${GAMMA_MODEL:-qwen3:8b}
+      BETA_OLLAMA_URL:  ${BETA_URL:-http://192.168.1.9:11434}
+      BETA_MODEL:       ${BETA_MODEL:-qwen3:8b}
+      CCF_REFRESH_SECONDS: "14400"
+    volumes:
+      - audit-data:/app/audit
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 128M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  # ── aria-audit — anonymization + disk writer ──────────────────────────────────
+  aria-audit:
+    <<: *defaults
+    build: {context: ./aria-audit}
+    container_name: aria-audit
+    hostname: aria-audit
+    environment:
+      REDIS_URL:               "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP:         "aria-kafka:9092"
+      PRESIDIO_ANALYZER_URL:   "http://aria-presidio-analyzer:3000"
+      PRESIDIO_ANONYMIZER_URL: "http://aria-presidio-anonymizer:3000"
+      BETA_OLLAMA_URL:         "http://192.168.1.9:11434"
+      BETA_MODEL:              "qwen3:8b"
+      AUDIT_DIR:               "/app/audit"
+      FILE_CAP_BYTES:          "1048576"
+    volumes:
+      - audit-data:/app/audit
+    depends_on:
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── Guacamole ──────────────────────────────────────────────────────────────────
+  guacamole-db:
+    <<: *defaults
+    image: postgres:17-alpine
+    container_name: aria-guacamole-db
+    hostname: aria-guacamole-db
+    environment:
+      POSTGRES_DB:       guacamole_db
+      POSTGRES_USER:     guacamole_user
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASS:-guac-db-changeme}
+    volumes:
+      - ./guacamole/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guacamole_user -d guacamole_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  guacd:
+    <<: *defaults
+    image: guacamole/guacd:1.5.5
+    container_name: aria-guacd
+    hostname: aria-guacd
+    deploy:
+      resources:
+        limits: {memory: 128M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  guacamole:
+    <<: *defaults
+    image: guacamole/guacamole:1.5.5
+    container_name: aria-guacamole
+    hostname: aria-guacamole
+    environment:
+      GUACD_HOSTNAME:      aria-guacd
+      GUACD_PORT:          4822
+      POSTGRESQL_HOSTNAME: aria-guacamole-db
+      POSTGRESQL_PORT:     5432
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER:     guacamole_user
+      POSTGRESQL_PASSWORD: ${GUACAMOLE_DB_PASS:-guac-db-changeme}
+    depends_on:
+      guacamole-db: {condition: service_healthy}
+      guacd:        {condition: service_started}
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  # ── Qdrant — vector store for RAG ────────────────────────────────────────────
+  qdrant:
+    <<: *defaults
+    image: qdrant/qdrant:v1.9.2
+    container_name: aria-qdrant
+    hostname: aria-qdrant
+    volumes:
+      - qdrant-data:/qdrant/storage
+    deploy:
+      resources:
+        limits: {memory: 512M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── aria-rag — ingestion + search service ─────────────────────────────────────
+  aria-rag:
+    <<: *defaults
+    build: {context: ./aria-rag}
+    container_name: aria-rag
+    hostname: aria-rag
+    environment:
+      QDRANT_URL:       "http://aria-qdrant:6333"
+      EMBED_OLLAMA_URL: ${ALPHA_URL:-http://192.168.1.9:11434}
+      EMBED_MODEL:      "nomic-embed-text"
+      KNOWLEDGE_DIR:    "/app/knowledge"
+      PLAYBOOKS_DIR:    "/app/playbooks"
+      AUDIT_DIR:        "/app/audit"
+      WATCH_INTERVAL_SECS: "60"
+    volumes:
+      - ./aria-ccf/playbooks:/app/playbooks:ro
+      - audit-data:/app/audit:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── Web — Next.js frontend container ──────────────────────────────────────────
+  # Handles: server-side rendering, signal capture, CiD assembly,
+  # Kafka production, Redis pub/sub SSE stream to browser
+  # No aria-intake — this IS the intake layer
+  web:
+    <<: *defaults
+    build: {context: ./web}
+    container_name: aria-web
+    hostname: aria-web
+    ports: ["3002:3002"]
+    environment:
+      REDIS_URL:           "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP:     "aria-kafka:9092"
+      DEFAULT_TENANT_ID:   ${DEFAULT_TENANT_ID:-prvis}
+      DEFAULT_ORG_ID:      ${DEFAULT_ORG_ID:-prvis}
+      DEFAULT_CUSTOMER_ID: ${DEFAULT_CUSTOMER_ID:-demo-customer}
+      TOKEN_BUDGET:        ${TOKEN_BUDGET:-100000}
+    depends_on:
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits: {memory: 512M, cpus: "0.5"}
+    networks: [aria-internal]

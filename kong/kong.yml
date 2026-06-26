@@ -1,0 +1,133 @@
+_format_version: "3.0"
+_transform: true
+
+# Aria Kong — DB-less declarative config
+# Single entry point. Routes to aria-orchestrator.
+# aria-orchestrator chains Alpha → Gamma → Beta internally.
+# CiD stamped and verified at every hop.
+
+consumers:
+  - username: aria-web
+    keyauth_credentials:
+      - key: aria-dev-key
+
+plugins:
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+
+  - name: file-log
+    config:
+      path: /dev/stdout
+      reopen: false
+
+  - name: rate-limiting
+    config:
+      minute: 60
+      hour: 1000
+      policy: local
+      limit_by: consumer
+
+services:
+
+  - name: aria-chat
+    url: http://aria-orchestrator:8000
+    connect_timeout: 5000
+    write_timeout: 10000
+    read_timeout: 600000
+    routes:
+      - name: chat-route
+        methods: [POST]
+        paths: [/v1/chat]
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  - name: aria-status
+    url: http://aria-orchestrator:8000
+    connect_timeout: 5000
+    read_timeout: 10000
+    routes:
+      - name: status-route
+        methods: [GET]
+        paths: [/v1/status]
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  - name: aria-activity
+    url: http://aria-orchestrator:8000
+    connect_timeout: 5000
+    read_timeout: 60000
+    routes:
+      - name: activity-route
+        methods: [GET]
+        paths: [/v1/activity]
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  - name: aria-personas
+    url: http://aria-orchestrator:8000/v1/personas
+    connect_timeout: 5000
+    read_timeout: 5000
+    routes:
+      - name: personas-route
+        methods: [GET]
+        paths: [/v1/personas]
+        strip_path: false
+
+  - name: aria-health
+    url: http://aria-orchestrator:8000/health
+    connect_timeout: 3000
+    read_timeout: 5000
+    routes:
+      - name: health-route
+        methods: [GET]
+        paths: [/health]
+        strip_path: false
+
+  - name: aria-conversation
+    url: http://aria-orchestrator:8000
+    connect_timeout: 5000
+    read_timeout: 10000
+    routes:
+      - name: conversation-route
+        methods: [GET]
+        paths: [/v1/conversation]
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  - name: aria-sessions
+    url: http://aria-orchestrator:8000
+    connect_timeout: 5000
+    read_timeout: 10000
+    routes:
+      - name: sessions-route
+        methods: [GET]
+        paths: [/v1/sessions]
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true

@@ -1,0 +1,170 @@
+# prvis Tool Registry
+# Full tool catalogue with descriptions, parameters, and reachability.
+# Referenced by Alpha-CCF and loaded into Alpha context at boot.
+# Updated when new tools or connectors are added.
+
+mcp_server:
+  url: http://aria-mcp-servers:8100
+  protocol: HTTP
+  endpoints:
+    list: GET /mcp/tools/list
+    call: POST /mcp/tools/call
+
+proxmox_api:
+  url: https://192.168.1.220:8006
+  protocol: REST
+  auth: PVEAPIToken=aria@pve!provisioner=<secret>
+  node: host2
+
+tools:
+  - name: proxmox_list_vms
+    category: infrastructure
+    description: List all VMs on Proxmox host2 with their status (running/stopped)
+    params: {}
+    read_only: true
+
+  - name: proxmox_get_vm_status
+    category: infrastructure
+    description: Get detailed runtime status of a VM including CPU, memory, uptime
+    params:
+      vmid: integer — VM ID (e.g. 101)
+    read_only: true
+
+  - name: proxmox_create_vm
+    category: infrastructure
+    description: >
+      Create a new Ubuntu 24.04 VM from cloud image on host2.
+      VM boots automatically. Guest agent required for post-boot commands.
+    params:
+      vmid: integer — must be 105 or higher (101-104 are reserved)
+      name: string — VM hostname
+      cores: integer — CPU cores (default 4)
+      memory_mb: integer — RAM in MB (default 4096)
+      disk_gb: integer — disk size in GB (default 20)
+      ip: string — IP address e.g. 192.168.1.22
+    read_only: false
+    write_mode_required: true
+
+  - name: proxmox_wait_for_agent
+    category: infrastructure
+    description: Poll until VM guest agent responds. Confirms VM fully booted. Timeout 180s.
+    params:
+      vmid: integer
+    read_only: true
+
+  - name: proxmox_guest_exec
+    category: infrastructure
+    description: Run a shell command inside a VM via qemu-guest-agent. Returns stdout/stderr/exitcode.
+    params:
+      vmid: integer
+      command: string — shell command to execute
+    read_only: false
+    write_mode_required: true
+
+  - name: ssh_exec
+    category: infrastructure
+    description: Run a shell command on a registered VM via SSH.
+    params:
+      vm_name: string — registered VM name
+      command: string — shell command
+    read_only: false
+    write_mode_required: true
+
+  - name: wazuh_get_alerts
+    category: security
+    description: Fetch recent security alerts from Wazuh SIEM filtered by severity and time window
+    params:
+      severity_min: integer — minimum severity level (1-15, 10+ is high)
+      limit: integer — max results (default 20)
+      hours: integer — lookback window in hours (default 24)
+    read_only: true
+
+  - name: wazuh_get_agent_status
+    category: security
+    description: Check connectivity and version status of all Wazuh endpoint agents
+    params: {}
+    read_only: true
+
+  - name: wazuh_search_alerts
+    category: security
+    description: Full-text search across Wazuh alerts
+    params:
+      query: string — search term or rule description
+      limit: integer
+    read_only: true
+
+  - name: fleet_get_devices
+    category: mdm
+    description: Get enrolled device inventory from FleetDM. Filter by failing_policies_only for compliance view.
+    params:
+      failing_policies_only: boolean (optional)
+    read_only: true
+
+  - name: fleet_run_query
+    category: mdm
+    description: Run a live osquery SQL query against all enrolled endpoints
+    params:
+      query: string — valid osquery SQL
+    read_only: true
+
+  - name: fleet_get_software
+    category: mdm
+    description: Get software inventory across endpoints with optional vulnerability filter
+    params:
+      vulnerable_only: boolean (optional)
+    read_only: true
+
+  - name: dojo_get_findings
+    category: vulnerability
+    description: Retrieve vulnerability findings from DefectDojo
+    params:
+      severity: string — Critical/High/Medium/Low (optional)
+      limit: integer (default 20)
+    read_only: true
+
+  - name: dojo_create_finding
+    category: vulnerability
+    description: Create a new vulnerability finding in DefectDojo
+    params:
+      title: string
+      severity: string — Critical/High/Medium/Low
+      description: string
+    read_only: false
+    write_mode_required: true
+
+  - name: dojo_close_finding
+    category: vulnerability
+    description: Mark a vulnerability finding as resolved
+    params:
+      finding_id: integer
+      resolution_note: string
+    read_only: false
+    write_mode_required: true
+
+  - name: hive_get_cases
+    category: incident
+    description: Retrieve incident cases from TheHive
+    params:
+      status: string — Open/Resolved (optional)
+      limit: integer (default 10)
+    read_only: true
+
+  - name: hive_create_case
+    category: incident
+    description: Create a new incident case in TheHive
+    params:
+      title: string
+      severity: integer — 1-4 (1=low, 4=critical)
+      tags: list of strings (optional)
+    read_only: false
+    write_mode_required: true
+
+  - name: hive_add_observable
+    category: incident
+    description: Add an IOC observable (IP, domain, hash, email) to an existing TheHive case
+    params:
+      data_type: string — ip/domain/hash/email/url
+      data: string — the observable value
+      tlp: integer — Traffic Light Protocol 0-4 (default 2)
+    read_only: false
+    write_mode_required: true

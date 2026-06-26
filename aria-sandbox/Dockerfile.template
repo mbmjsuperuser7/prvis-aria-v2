@@ -1,0 +1,82 @@
+FROM debian:12-slim
+
+# Security and ops toolkit — discovery and diagnostic only
+# No offensive scanning tools — no nuclei, no ffuf, no masscan
+# nmap: host discovery and specific port checks only (enforced via Alpha/Beta prompts)
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Shell and core utils
+    bash zsh \
+    coreutils util-linux procps \
+    findutils grep sed gawk \
+    # Network — discovery and diagnostics
+    curl wget \
+    dnsutils iputils-ping iputils-tracepath \
+    netcat-openbsd \
+    nmap \
+    net-tools iproute2 \
+    whois \
+    # Security and PKI
+    openssh-client \
+    openssl \
+    gnupg \
+    # File and archive
+    file unzip zip tar gzip bzip2 xz-utils \
+    rsync \
+    # Dev tools
+    git \
+    vim nano less \
+    # Build essentials
+    build-essential \
+    python3 python3-pip python3-venv python3-dev \
+    # System inspection
+    lsof \
+    # Database clients
+    postgresql-client \
+    redis-tools \
+    # Certificates
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Newman (Postman CLI) — runs user-supplied collections against user's own APIs
+RUN npm install -g newman 2>/dev/null
+
+# HTTPie — human-friendly single HTTP requests
+RUN pip3 install --no-cache-dir --break-system-packages httpie
+
+# Python security and ops libraries
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests httpx \
+    paramiko \
+    pyyaml \
+    boto3 \
+    cryptography \
+    netmiko \
+    pandas \
+    rich \
+    typer \
+    pytest \
+    python-nmap \
+    beautifulsoup4 \
+    lxml
+
+# jq and yq
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+    -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+
+WORKDIR /workspace
+
+RUN useradd -m -u 1000 aria && chown aria:aria /workspace
+USER aria
+
+ENV TERM=xterm-256color
+ENV SHELL=/bin/bash
+
+CMD ["sleep", "3600"]

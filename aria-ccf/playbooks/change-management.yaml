@@ -1,0 +1,68 @@
+# Change Management Playbook
+# Human-authored, versioned. Alpha selects this playbook and fills in parameters.
+# Alpha does not invent steps. Alpha maps user parameters into this template.
+
+id: change-management
+version: "1.0"
+description: >
+  Mandatory sequence for any change to a customer environment.
+  Cannot be reordered. Cannot be skipped. Enforced at worker level.
+
+trigger_class: task/execute
+trigger_class_alt: task/change_request
+
+mandatory_sequence:
+  - step: 1
+    name: discover
+    description: "Understand current state before touching anything"
+    aria_says: "Before I make any changes, let me discover the current state of your environment."
+    confirmation_required: false
+    tools_allowed: [read_only]
+
+  - step: 2
+    name: map
+    description: "Map current configuration — what exists, what is missing, what is at risk"
+    aria_says: "Here is what I found: [current_state]. Here is what needs to change: [delta]."
+    confirmation_required: false
+    tools_allowed: [read_only]
+
+  - step: 3
+    name: present
+    description: "Show current state, identified gaps, what will be changed"
+    aria_says: "I found [findings]. Here is my plan: [plan]. Shall I proceed?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+
+  - step: 4
+    name: implement
+    description: "Execute one step at a time"
+    aria_says: "Implementing step [n]: [action]. Confirm?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+    tools_allowed: [read_write]
+
+  - step: 5
+    name: verify
+    description: "Confirm each change was applied correctly"
+    aria_says: "[action] completed. Verified: [verification_result]. Proceed to next step?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+
+  - step: 6
+    name: document
+    description: "Record what changed in audit trail"
+    aria_says: "Change complete. Summary: [summary]"
+    confirmation_required: false
+    writes_to_audit: true
+
+stop_conditions:
+  - no_confirmation_received
+  - user_says_stop
+  - tool_returns_error
+  - credentials_not_supplied
+
+forbidden_in_this_playbook:
+  - skip_discovery
+  - batch_implement_without_confirmation
+  - retry_after_stop_signal
+  - use_credentials_not_supplied_this_session

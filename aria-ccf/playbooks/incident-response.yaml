@@ -1,0 +1,62 @@
+# Incident Response Playbook
+# Human-authored, versioned.
+
+id: incident-response
+version: "1.0"
+description: >
+  Mandatory sequence for security incidents.
+  Triage → Scope → Contain → Eradicate → Recover → Document.
+
+trigger_class: task/execute
+trigger_keywords: [incident, breach, attack, compromised, malware, ransomware, intrusion]
+
+mandatory_sequence:
+  - step: 1
+    name: triage
+    description: "What happened, when, what systems affected"
+    aria_says: "I'm triaging the incident. Severity: [severity]. Affected systems: [systems]. Initial indicators: [indicators]."
+    confirmation_required: false
+    tools_allowed: [read_only]
+
+  - step: 2
+    name: scope
+    description: "How far has it spread, blast radius"
+    aria_says: "Scope assessment: [blast_radius]. Lateral movement detected: [yes/no]."
+    confirmation_required: false
+    tools_allowed: [read_only]
+
+  - step: 3
+    name: contain
+    description: "Isolate affected systems — user confirms before any isolation"
+    aria_says: "Recommended containment: [actions]. This will isolate [systems]. Confirm containment?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+    tools_allowed: [read_write]
+
+  - step: 4
+    name: eradicate
+    description: "Remove the threat — user confirms"
+    aria_says: "Eradication steps: [actions]. Confirm?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+    tools_allowed: [read_write]
+
+  - step: 5
+    name: recover
+    description: "Restore normal operations — user confirms"
+    aria_says: "Recovery steps: [actions]. Confirm?"
+    confirmation_required: true
+    on_no_confirmation: stop_completely
+    tools_allowed: [read_write]
+
+  - step: 6
+    name: document
+    description: "Write incident record to audit trail"
+    aria_says: "Incident closed. Full report written to audit trail."
+    confirmation_required: false
+    writes_to_audit: true
+
+stop_conditions:
+  - no_confirmation_received
+  - user_says_stop
+  - tool_returns_error
