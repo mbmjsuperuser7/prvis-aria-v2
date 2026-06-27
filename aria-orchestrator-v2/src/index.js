@@ -31,6 +31,10 @@ import { writeActivity, writeRoutingDecision, writeToolResult, writeResult } fro
 // ── Config ───────────────────────────────────────────────────────────────────
 
 const KAFKA_BOOTSTRAP = process.env.KAFKA_BOOTSTRAP || 'aria-kafka:9092';
+
+// Deduplication — prevent double processing on Kafka rejoin
+const processedTasks = new Set();
+const DEDUP_TTL_MS = 60_000; // forget after 60 seconds
 const REDIS_URL       = process.env.REDIS_URL       || 'redis://aria-redis:6379/0';
 const MAX_RETRIES     = 3;
 const RESULT_TTL      = 86400;
@@ -136,6 +140,14 @@ async function handleRequest(envelope) {
     console.warn('[orchestrator] Invalid envelope — dropping', { cid: cid.slice(0, 20) });
     return;
   }
+
+  // Deduplication — skip if already processed
+  if (processedTasks.has(taskId)) {
+    console.warn('[orchestrator] Duplicate taskId — skipping', taskId.slice(0, 20));
+    return;
+  }
+  processedTasks.add(taskId);
+  setTimeout(() => processedTasks.delete(taskId), DEDUP_TTL_MS);
 
   // First name comes from aria-ccf session key — set on first message only.
   // If key is absent, session is already in progress — name not needed.
