@@ -176,7 +176,7 @@ async function handleRequest(envelope) {
     const userMsg  = buildUserMessage(message, displayName, isFirst);
 
     // ── 6. Call selected Ollama instance ─────────────────────────────────────
-    console.log(`[orchestrator] routing=${routing.instance} systemPrompt=${JSON.stringify(systemPrompt?.slice(0,80))} history=${history.length} msg=${userMsg.slice(0,60)}`);
+    console.log(`[orchestrator] routing=${routing.instance} model=${routing.instance} history=${history.length} msg=${userMsg.slice(0,60)}`);
     await writeActivity(redis, {
       cid,
       taskId,
