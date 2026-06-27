@@ -209,8 +209,8 @@ export class AriaRouter {
 
     if (conversational) return { intent: 'conversational', blastRadius: 'zero' };
 
-    // Production-touching signals — high blast radius
-    const productionPatterns = /\b(production|prod|live|deploy|enforce|enable|disable|configure|change|modify|delete|remove|restart|reboot|rollback|firewall|mtls|tls|certificate|acl|policy|rule|access|proxmox|ssh|vm|provision|hypervisor|token|secret|password|credential|subnet|gateway|storage|disk|node|cluster|boot|install|setup)\b/i;
+    // High blast radius — only explicit destructive or write operations on prod systems
+    const productionPatterns = /\b(delete|destroy|format|wipe|shutdown|terminate|rollback|revoke)\b/i;
     const highBlast = productionPatterns.test(lower);
 
     // Stateful change signals — medium blast radius

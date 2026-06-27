@@ -34,26 +34,17 @@ const TOKEN_BUDGET     = parseInt(process.env.TOKEN_BUDGET || '100000')
 const DEFAULT_TENANT   = process.env.DEFAULT_TENANT_ID || 'prvis'
 const DEFAULT_ORG      = process.env.DEFAULT_ORG_ID    || 'prvis'
 
-// ── Forbidden patterns — blocked before Kafka ────────────────────────────────
-// Network scanning, credential stuffing, prompt injection
-const FORBIDDEN: Array<[RegExp, string]> = [
-  [/\bnetwork\s+scan\b/i,                                       'network_scan'],
-  [/\bport\s+scan\b/i,                                          'network_scan'],
-  [/\brun\s+a\s+(network|port|ip|host)\s+scan\b/i,            'network_scan'],
-  [/scan\s+(all\s+)?(ip|network|subnet|range|host)/i,           'network_scan'],
-  [/(nmap|masscan|zmap|shodan)\b/i,                              'network_scan_tool'],
-  [/ip\s+(range|sweep|scan)/i,                                   'ip_range_scan'],
-  [/(brute.?force|credential.?stuff)/i,                          'credential_stuffing'],
-  [/ignore\s+(previous|all|your)\s+instructions/i,              'prompt_injection'],
-  [/you\s+are\s+now\s+/i,                                       'prompt_injection'],
-  [/(jailbreak|developer\s+mode|bypass\s+your|override\s+your)/i,'prompt_injection'],
-  [/(reveal|print|show)\s+your\s+(system\s+)?prompt/i,          'prompt_injection'],
-  [/lateral\s+movement/i,                                        'lateral_movement'],
+// ── Prompt injection only — everything else goes to the LLM ─────────────────
+const PROMPT_INJECTION: Array<RegExp> = [
+  /ignore\s+(previous|all|your)\s+instructions/i,
+  /you\s+are\s+now\s+/i,
+  /(jailbreak|developer\s+mode|bypass\s+your|override\s+your)/i,
+  /(reveal|print|show)\s+your\s+(system\s+)?prompt/i,
 ]
 
 function checkForbidden(message: string): string | null {
-  for (const [pattern, type] of FORBIDDEN) {
-    if (pattern.test(message)) return type
+  for (const pattern of PROMPT_INJECTION) {
+    if (pattern.test(message)) return 'prompt_injection'
   }
   return null
 }
