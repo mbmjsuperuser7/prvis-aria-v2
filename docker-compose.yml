@@ -1,22 +1,11 @@
-# prvis-aria — Aria agent platform
-#
-# Stack:
-#   web (Next.js)       — frontend, CiD assembly, Kafka producer, Redis pub/sub SSE
-#   aria-orchestrator   — ruflo router, routes to α/γ/β Ollamas, tool execution
-#   aria-rag            — RAG ingestion + search (LLM calls as tool)
-#   aria-qdrant         — vector store (standards, playbooks, tools, ACiDF)
-#   aria-ccf            — KV cache warm (name-only prompts, tool registry)
-#   aria-audit          — Presidio anonymization, ACiDF write to disk
-#   aria-sandbox        — execution sandbox for β tool calls
-#   Kafka, Redis, Presidio, Guacamole — infrastructure
+# prvis-aria v2 — Aria agent platform
 #
 # Flow:
 #   Browser → web:3002 → Kafka(aria.requests)
-#   → aria-orchestrator → α/γ/β Ollama (LLM calls knowledge_search tool as needed)
-#   → aria-rag → Qdrant (on tool call)
-#   → Redis pub/sub(activity:{cid}) → web SSE → Browser (live activity)
-#   → Kafka(aria.results.tasks) → Redis(result:{taskId}) → Browser (final response)
-#   → Kafka(all topics) → aria-audit → Presidio → ACiDF (audit trail)
+#   → aria-orchestrator (ruflo) → α/γ/β Ollama
+#   → Redis pub/sub(activity:{cid}) → web SSE → Browser
+#   → Kafka(aria.results.tasks) → Redis(result:{taskId}) → Browser
+#   → Kafka → aria-audit → Presidio → ACiDF on disk
 
 x-defaults: &defaults
   restart: unless-stopped
@@ -35,7 +24,6 @@ volumes:
   redis-data:
   kafka-data:
   audit-data:
-  ccf-data:
   qdrant-data:
 
 services:
@@ -98,6 +86,11 @@ services:
     image: mcr.microsoft.com/presidio-analyzer:latest
     container_name: aria-presidio-analyzer
     hostname: aria-presidio-analyzer
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     deploy:
       resources:
         limits: {memory: 1G, cpus: "1.0"}
@@ -108,28 +101,17 @@ services:
     image: mcr.microsoft.com/presidio-anonymizer:latest
     container_name: aria-presidio-anonymizer
     hostname: aria-presidio-anonymizer
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     deploy:
       resources:
         limits: {memory: 512M, cpus: "0.5"}
     networks: [aria-internal]
 
-  # ── ccf-init — copies CCF files to shared volume at startup ─────────────────────
-  ccf-init:
-    image: python:3.12-slim
-    container_name: aria-ccf-init
-    command: >
-      sh -c "cp /src/ccf/*.md /dst/ && echo 'CCF files copied' && ls /dst/"
-    volumes:
-      - ./aria-ccf/ccf:/src/ccf:ro
-      - ccf-data:/dst
-    restart: "no"
-    networks: [aria-internal]
-
-  # aria-intake removed — Next.js handles Kafka production and SSE directly
-
-  # ── aria-orchestrator v2 — ruflo-powered ─────────────────────────────────────
-  # Replaces: aria-orchestrator, aria-alpha, aria-gamma, aria-beta
-  # Single Node.js process with ruflo Thompson bandit routing to α/γ/β Ollamas
+  # ── aria-orchestrator — ruflo Node.js, routes to α/γ/β ───────────────────────
   aria-orchestrator:
     <<: *defaults
     build: {context: ./aria-orchestrator-v2}
@@ -140,7 +122,7 @@ services:
       KAFKA_BOOTSTRAP:   "aria-kafka:9092"
       ALPHA_OLLAMA_URL:  ${ALPHA_URL:-http://192.168.1.9:11434}
       ALPHA_MODEL:       ${ALPHA_MODEL:-qwen3:30b-a3b}
-      GAMMA_OLLAMA_URL:  ${GAMMA_URL:-http://192.168.1.9:11434}
+      GAMMA_OLLAMA_URL:  ${GAMMA_URL:-http://100.66.170.90:11434}
       GAMMA_MODEL:       ${GAMMA_MODEL:-qwen3:14b}
       BETA_OLLAMA_URL:   ${BETA_URL:-http://192.168.1.9:11434}
       BETA_MODEL:        ${BETA_MODEL:-qwen3:8b}
@@ -148,7 +130,6 @@ services:
       ROUTER_STATE_PATH: ".swarm/aria-router-state.json"
       RAG_URL:           "http://aria-rag:8300"
       RAG_TIMEOUT_MS:    "5000"
-      # Tool endpoints — used when executing tool calls
       PROXMOX_URL:       ${PROXMOX_URL:-https://192.168.1.220:8006}
       GUACAMOLE_URL:     "http://aria-guacamole:8080"
       WAZUH_URL:         ${WAZUH_URL:-}
@@ -166,45 +147,24 @@ services:
         limits: {memory: 256M, cpus: "0.5"}
     networks: [aria-internal]
 
-  # ── aria-sandbox — ephemeral containers per CiD ───────────────────────────────
-  aria-sandbox:
-    <<: *defaults
-    build: {context: ./aria-sandbox}
-    container_name: aria-sandbox
-    hostname: aria-sandbox
-    environment:
-      SANDBOX_TEMPLATE_IMAGE: aria-sandbox-template:latest
-      SANDBOX_NETWORK:        prvis-aria_aria-internal
-      SANDBOX_MEM_LIMIT:      256m
-      SANDBOX_CPU_LIMIT:      "0.5"
-      EXEC_TIMEOUT_SECONDS:   "60"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    deploy:
-      resources:
-        limits: {memory: 128M, cpus: "0.25"}
-    networks: [aria-internal]
-
-  # ── aria-ccf — KV cache warm service ─────────────────────────────────────────
+  # ── aria-ccf — warms Ollama KV cache with system prompts ─────────────────────
+  # CCF files baked into image at build time — no volume needed
   aria-ccf:
     <<: *defaults
     build: {context: ./aria-ccf}
     container_name: aria-ccf
     hostname: aria-ccf
     environment:
-      REDIS_URL:        "redis://aria-redis:6379/0"
-      KAFKA_BOOTSTRAP:  "aria-kafka:9092"
-      CCF_DIR:          "/app/ccf"
-      AUDIT_DIR:        "/app/audit"
-      ALPHA_OLLAMA_URL: ${ALPHA_URL:-http://192.168.1.9:11434}
-      ALPHA_MODEL:      ${ALPHA_MODEL:-qwen3:30b-a3b}
-      GAMMA_OLLAMA_URL: ${GAMMA_URL:-http://192.168.1.9:11434}
-      GAMMA_MODEL:      ${GAMMA_MODEL:-qwen3:8b}
-      BETA_OLLAMA_URL:  ${BETA_URL:-http://192.168.1.9:11434}
-      BETA_MODEL:       ${BETA_MODEL:-qwen3:8b}
+      REDIS_URL:           "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP:     "aria-kafka:9092"
+      CCF_DIR:             "/app/ccf"
+      ALPHA_OLLAMA_URL:    ${ALPHA_URL:-http://192.168.1.9:11434}
+      ALPHA_MODEL:         ${ALPHA_MODEL:-qwen3:30b-a3b}
+      GAMMA_OLLAMA_URL:    ${GAMMA_URL:-http://100.66.170.90:11434}
+      GAMMA_MODEL:         ${GAMMA_MODEL:-qwen3:14b}
+      BETA_OLLAMA_URL:     ${BETA_URL:-http://192.168.1.9:11434}
+      BETA_MODEL:          ${BETA_MODEL:-qwen3:8b}
       CCF_REFRESH_SECONDS: "14400"
-    volumes:
-      - audit-data:/app/audit
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -215,7 +175,7 @@ services:
         limits: {memory: 128M, cpus: "0.25"}
     networks: [aria-internal]
 
-  # ── aria-audit — anonymization + disk writer ──────────────────────────────────
+  # ── aria-audit — Presidio anonymization, ACiDF writer ────────────────────────
   aria-audit:
     <<: *defaults
     build: {context: ./aria-audit}
@@ -226,8 +186,8 @@ services:
       KAFKA_BOOTSTRAP:         "aria-kafka:9092"
       PRESIDIO_ANALYZER_URL:   "http://aria-presidio-analyzer:3000"
       PRESIDIO_ANONYMIZER_URL: "http://aria-presidio-anonymizer:3000"
-      BETA_OLLAMA_URL:         "http://192.168.1.9:11434"
-      BETA_MODEL:              "qwen3:8b"
+      BETA_OLLAMA_URL:         ${BETA_URL:-http://192.168.1.9:11434}
+      BETA_MODEL:              ${BETA_MODEL:-qwen3:8b}
       AUDIT_DIR:               "/app/audit"
       FILE_CAP_BYTES:          "1048576"
     volumes:
@@ -235,6 +195,64 @@ services:
     depends_on:
       redis: {condition: service_healthy}
       kafka: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 256M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── aria-sandbox — ephemeral execution containers ─────────────────────────────
+  aria-sandbox:
+    <<: *defaults
+    build: {context: ./aria-sandbox}
+    container_name: aria-sandbox
+    hostname: aria-sandbox
+    environment:
+      SANDBOX_TEMPLATE_IMAGE: aria-sandbox-template:latest
+      SANDBOX_NETWORK:        prvis-aria-v2_aria-internal
+      SANDBOX_MEM_LIMIT:      256m
+      SANDBOX_CPU_LIMIT:      "0.5"
+      EXEC_TIMEOUT_SECONDS:   "60"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits: {memory: 128M, cpus: "0.25"}
+    networks: [aria-internal]
+
+  # ── Qdrant — vector store ─────────────────────────────────────────────────────
+  qdrant:
+    <<: *defaults
+    image: qdrant/qdrant:v1.9.2
+    container_name: aria-qdrant
+    hostname: aria-qdrant
+    volumes:
+      - qdrant-data:/qdrant/storage
+    deploy:
+      resources:
+        limits: {memory: 512M, cpus: "0.5"}
+    networks: [aria-internal]
+
+  # ── aria-rag — knowledge ingestion + search ───────────────────────────────────
+  aria-rag:
+    <<: *defaults
+    build: {context: ./aria-rag}
+    container_name: aria-rag
+    hostname: aria-rag
+    environment:
+      QDRANT_URL:          "http://aria-qdrant:6333"
+      EMBED_OLLAMA_URL:    ${ALPHA_URL:-http://192.168.1.9:11434}
+      EMBED_MODEL:         "nomic-embed-text"
+      KNOWLEDGE_DIR:       "/app/knowledge"
+      PLAYBOOKS_DIR:       "/app/playbooks"
+      AUDIT_DIR:           "/app/audit"
+      WATCH_INTERVAL_SECS: "60"
+    volumes:
+      - ./aria-ccf/playbooks:/app/playbooks:ro
+      - audit-data:/app/audit:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
     deploy:
       resources:
         limits: {memory: 256M, cpus: "0.5"}
@@ -267,6 +285,11 @@ services:
     image: guacamole/guacd:1.5.5
     container_name: aria-guacd
     hostname: aria-guacd
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 4822 && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits: {memory: 128M, cpus: "0.25"}
@@ -293,49 +316,7 @@ services:
         limits: {memory: 256M, cpus: "0.25"}
     networks: [aria-internal]
 
-  # ── Qdrant — vector store for RAG ────────────────────────────────────────────
-  qdrant:
-    <<: *defaults
-    image: qdrant/qdrant:v1.9.2
-    container_name: aria-qdrant
-    hostname: aria-qdrant
-    volumes:
-      - qdrant-data:/qdrant/storage
-    deploy:
-      resources:
-        limits: {memory: 512M, cpus: "0.5"}
-    networks: [aria-internal]
-
-  # ── aria-rag — ingestion + search service ─────────────────────────────────────
-  aria-rag:
-    <<: *defaults
-    build: {context: ./aria-rag}
-    container_name: aria-rag
-    hostname: aria-rag
-    environment:
-      QDRANT_URL:       "http://aria-qdrant:6333"
-      EMBED_OLLAMA_URL: ${ALPHA_URL:-http://192.168.1.9:11434}
-      EMBED_MODEL:      "nomic-embed-text"
-      KNOWLEDGE_DIR:    "/app/knowledge"
-      PLAYBOOKS_DIR:    "/app/playbooks"
-      AUDIT_DIR:        "/app/audit"
-      WATCH_INTERVAL_SECS: "60"
-    volumes:
-      - ./aria-ccf/playbooks:/app/playbooks:ro
-      - audit-data:/app/audit:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - qdrant
-    deploy:
-      resources:
-        limits: {memory: 256M, cpus: "0.5"}
-    networks: [aria-internal]
-
-  # ── Web — Next.js frontend container ──────────────────────────────────────────
-  # Handles: server-side rendering, signal capture, CiD assembly,
-  # Kafka production, Redis pub/sub SSE stream to browser
-  # No aria-intake — this IS the intake layer
+  # ── Web — Next.js frontend ────────────────────────────────────────────────────
   web:
     <<: *defaults
     build: {context: ./web}
