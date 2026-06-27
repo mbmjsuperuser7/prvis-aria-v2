@@ -200,8 +200,12 @@ export class AriaRouter {
     const lower = message.toLowerCase();
 
     // Conversational signals
-    const conversational = /^(hi|hello|hey|who are you|what are you|how are you|thanks|thank you|good|ok|okay|sure|yes|no|bye|help)[\s?!.]*$/i.test(message.trim()) ||
-      /\b(explain|what is|what are|what does|how does|tell me about|describe|define)\b/i.test(lower);
+    // Only truly conversational if short greeting — not if it contains action words
+    const hasActionWords = /\b(run|execute|create|scan|ssh|deploy|provision|install|configure|enable|disable|restart|check|list|show|find|get|fetch|connect|access|can you)\b/i.test(lower)
+    const conversational = !hasActionWords && (
+      /^(hi|hello|hey|thanks|thank you|good|ok|okay|sure|yes|no|bye)[\s?!.]*$/i.test(message.trim()) ||
+      /^(who are you|what are you|how are you|what is your name)[\s?!.]*$/i.test(message.trim())
+    )
 
     if (conversational) return { intent: 'conversational', blastRadius: 'zero' };
 

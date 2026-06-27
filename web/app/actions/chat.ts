@@ -37,15 +37,17 @@ const DEFAULT_ORG      = process.env.DEFAULT_ORG_ID    || 'prvis'
 // ── Forbidden patterns — blocked before Kafka ────────────────────────────────
 // Network scanning, credential stuffing, prompt injection
 const FORBIDDEN: Array<[RegExp, string]> = [
-  [/scan\s+(all\s+)?(ip|network|subnet|range)/i,               'network_scan'],
-  [/(nmap|masscan|zmap)\b/i,                                    'network_scan_tool'],
-  [/ip\s+(range|sweep|scan)/i,                                  'ip_range_scan'],
-  [/(brute.?force|credential.?stuff)/i,                         'credential_stuffing'],
+  [/\bnetwork\s+scan\b/i,                                       'network_scan'],
+  [/\bport\s+scan\b/i,                                          'network_scan'],
+  [/scan\s+(all\s+)?(ip|network|subnet|range|host)/i,           'network_scan'],
+  [/(nmap|masscan|zmap|shodan)\b/i,                              'network_scan_tool'],
+  [/ip\s+(range|sweep|scan)/i,                                   'ip_range_scan'],
+  [/(brute.?force|credential.?stuff)/i,                          'credential_stuffing'],
   [/ignore\s+(previous|all|your)\s+instructions/i,              'prompt_injection'],
   [/you\s+are\s+now\s+/i,                                       'prompt_injection'],
   [/(jailbreak|developer\s+mode|bypass\s+your|override\s+your)/i,'prompt_injection'],
   [/(reveal|print|show)\s+your\s+(system\s+)?prompt/i,          'prompt_injection'],
-  [/lateral\s+movement/i,                                       'lateral_movement'],
+  [/lateral\s+movement/i,                                        'lateral_movement'],
 ]
 
 function checkForbidden(message: string): string | null {
