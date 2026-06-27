@@ -123,12 +123,14 @@ async function handleRequest(envelope) {
   const payload = envelope.payload || {};
   const retry   = envelope.retry   || 0;
 
+  // Strip audit-only signals immediately — never used in processing
+  const { _signals, ...cleanPayload } = payload;
   const {
     message    = '',
     username   = 'default-user',
     persona    = 'security_engineer',
     write_mode = false,
-  } = payload;
+  } = cleanPayload;
 
   if (!cid || !taskId || !message) {
     console.warn('[orchestrator] Invalid envelope — dropping', { cid: cid.slice(0, 20) });
@@ -177,6 +179,14 @@ async function handleRequest(envelope) {
     const userMsg  = buildUserMessage(message, displayName, isFirst);
 
     // ── 6. Call selected Ollama instance ─────────────────────────────────────
+    await writeActivity(redis, {
+      cid,
+      taskId,
+      actor:  routing.symbol,
+      event:  'llm_start',
+      detail: `${routing.instance} processing`,
+    });
+
     // LLM has knowledge_search in its tool list — calls it when it needs context
     const llmResult = await callOllama(routing.instance, {
       systemPrompt,
@@ -213,9 +223,8 @@ async function handleRequest(envelope) {
         detail: `Validating ${routing.instance}'s response`,
       });
 
-      const validationMsg = `Review this response for safety, accuracy, and completeness. ` +
-        `If it is safe and accurate, reply APPROVED. If not, reply REJECTED: [reason].\n\n` +
-        `Original request: ${message}\n\nResponse to validate:\n${llmResult.content}`;
+      // Lightweight validation — send response only, not full original message
+      const validationMsg = `Is this response safe and accurate? Reply APPROVED or REJECTED: [reason].\n\n${llmResult.content.slice(0, 500)}`;
 
       const validation = await callOllama(validationInstance, {
         systemPrompt: validationPrompt,
@@ -331,7 +340,7 @@ async function main() {
   console.log('[orchestrator] Kafka producer connected');
 
   await consumer.connect();
-  await consumer.subscribe({ topic: TOPIC_REQUESTS, fromBeginning: true });
+  await consumer.subscribe({ topic: TOPIC_REQUESTS, fromBeginning: false });
   console.log(`[orchestrator] Consuming ${TOPIC_REQUESTS}`);
 
   await consumer.run({
