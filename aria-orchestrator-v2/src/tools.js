@@ -38,29 +38,6 @@ const AVAILABLE_TOOLS = {
 }
 
 /**
- * Returns tool definitions for inclusion in Ollama tool call format.
- * Loaded into KV cache by aria-ccf so the LLM knows what tools exist.
- */
-export function getToolDefinitions() {
-  return Object.entries(AVAILABLE_TOOLS).map(([name, def]) => ({
-    type: 'function',
-    function: {
-      name,
-      description: def.description,
-      parameters: {
-        type: 'object',
-        properties: Object.fromEntries(
-          Object.entries(def.parameters).map(([k, v]) => [k, { type: v.type, description: v.description }])
-        ),
-        required: Object.entries(def.parameters)
-          .filter(([, v]) => v.required)
-          .map(([k]) => k),
-      },
-    },
-  }))
-}
-
-/**
  * Execute one tool call from the LLM.
  * Returns the result as a string the LLM can reason against.
  */

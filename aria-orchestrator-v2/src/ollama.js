@@ -12,7 +12,7 @@
  *   Tools:                     LLM calls when needed — never pre-fed
  */
 
-import { getToolDefinitions, handleToolCall } from './tools.js'
+import { handleToolCall } from './tools.js'
 
 const INSTANCES = {
   alpha: {
@@ -54,7 +54,6 @@ export async function callOllama(instanceName, {
   }
   messages.push({ role: 'user', content: message })
 
-  const tools = getToolDefinitions()
   const start = Date.now()
 
   // Tool call loop — LLM may call tools multiple times before final response
@@ -62,7 +61,6 @@ export async function callOllama(instanceName, {
     const body = {
       model:    inst.model,
       messages,
-      tools,
       stream:   false,
       options:  { temperature: 0.7, num_ctx: 8192 },
     }
