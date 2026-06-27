@@ -114,13 +114,6 @@ const I = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10)
 
-, () => Math.floor(Math.random() * 10)).join('')
-  let hash = 0
-  for (let i = 0; i < (username + ':prvis').length; i++)
-    hash = ((hash << 5) - hash) + (username + ':prvis').charCodeAt(i)
-  const uuid = (Math.abs(hash) % 100_000_000).toString().padStart(8, '0')
-  return `${ucid}:${uuid}:prvis:prvis:${username}`
-}
 
 function fmtTime(iso: string): string {
   try { return new Date(iso).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) }
