@@ -438,10 +438,6 @@ export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) 
     setMsgs(prev => [...prev, userMsg,
       {id:'__thinking__', role:'aria', content:'__thinking__', ts:Date.now()+1}])
 
-    const cid = cidRef.current
-    // SSE must connect BEFORE we send — so bubbles appear as events arrive
-    connectSSE(cid)
-
     try {
       const enqueued = await sendMessage({
         message: msg,
@@ -457,6 +453,9 @@ export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) 
       if (enqueued.cid) cidRef.current = enqueued.cid
 
       const taskId = enqueued.task_id
+
+      // Connect SSE AFTER we have the real CiD from server — not before
+      connectSSE(enqueued.cid)
 
       // Wait for pipeline to complete (SSE drives the bubbles, we just wait for done signal)
       const deadline = Date.now() + 300_000

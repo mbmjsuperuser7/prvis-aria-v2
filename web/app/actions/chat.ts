@@ -39,6 +39,7 @@ const DEFAULT_ORG      = process.env.DEFAULT_ORG_ID    || 'prvis'
 const FORBIDDEN: Array<[RegExp, string]> = [
   [/\bnetwork\s+scan\b/i,                                       'network_scan'],
   [/\bport\s+scan\b/i,                                          'network_scan'],
+  [/\brun\s+a\s+(network|port|ip|host)\s+scan\b/i,            'network_scan'],
   [/scan\s+(all\s+)?(ip|network|subnet|range|host)/i,           'network_scan'],
   [/(nmap|masscan|zmap|shodan)\b/i,                              'network_scan_tool'],
   [/ip\s+(range|sweep|scan)/i,                                   'ip_range_scan'],
