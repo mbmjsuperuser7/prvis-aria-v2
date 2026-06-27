@@ -301,34 +301,37 @@ export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) 
           setPipelineDone(true)
           es.close()
           sseConnectedCid.current = ''
-          // Fetch the actual response text from Redis via result endpoint
-          try {
-            const taskId = ev.task_id
-            if (taskId) {
-              const sr = await fetch(`/api/result/${taskId}`)
-              if (sr.ok) {
-                const result = await sr.json()
-                if (result.response) {
-                  setMsgs(prev => {
-                    const withoutThinking = prev
-                      .filter(m => m.id !== '__thinking__')
-                      .map(m => m.streaming ? {...m, streaming: false} : m)
-                    return [...withoutThinking, {
-                      id: uid(), role: 'aria',
-                      content: result.response,
-                      ts: Date.now(),
-                      node: nodeFromActor(ev.actor),
-                    }]
-                  })
-                  return
+          const evTaskId = ev.task_id
+          const evActor  = ev.actor
+          // Use IIFE to allow async fetch inside non-async onmessage
+          ;(async () => {
+            try {
+              if (evTaskId) {
+                const sr = await fetch(`/api/result/${evTaskId}`)
+                if (sr.ok) {
+                  const result = await sr.json()
+                  if (result.response) {
+                    setMsgs(prev => {
+                      const withoutThinking = prev
+                        .filter(m => m.id !== '__thinking__')
+                        .map(m => m.streaming ? {...m, streaming: false} : m)
+                      return [...withoutThinking, {
+                        id: uid(), role: 'aria',
+                        content: result.response,
+                        ts: Date.now(),
+                        node: nodeFromActor(evActor),
+                      }]
+                    })
+                    return
+                  }
                 }
               }
-            }
-          } catch {}
-          // Fallback — just clean up thinking bubble
-          setMsgs(prev => prev
-            .filter(m => m.id !== '__thinking__')
-            .map(m => m.streaming ? {...m, streaming: false} : m))
+            } catch {}
+            // Fallback — just clean up thinking bubble
+            setMsgs(prev => prev
+              .filter(m => m.id !== '__thinking__')
+              .map(m => m.streaming ? {...m, streaming: false} : m))
+          })()
           return
         }
 
