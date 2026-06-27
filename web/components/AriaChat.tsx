@@ -296,10 +296,40 @@ export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) 
     es.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data)
-        if (ev.actor === 'System' && ev.event === 'done') {
-          // Mark all streaming bubbles as done
-          setMsgs(prev => prev.map(m => m.streaming ? {...m, streaming: false} : m))
-          setPipelineDone(true); es.close(); sseConnectedCid.current = ''; return
+        // Pipeline complete — fetch and render the actual response
+        if (ev.event === 'complete') {
+          setPipelineDone(true)
+          es.close()
+          sseConnectedCid.current = ''
+          // Fetch the actual response text from Redis via result endpoint
+          try {
+            const taskId = ev.task_id
+            if (taskId) {
+              const sr = await fetch(`/api/result/${taskId}`)
+              if (sr.ok) {
+                const result = await sr.json()
+                if (result.response) {
+                  setMsgs(prev => {
+                    const withoutThinking = prev
+                      .filter(m => m.id !== '__thinking__')
+                      .map(m => m.streaming ? {...m, streaming: false} : m)
+                    return [...withoutThinking, {
+                      id: uid(), role: 'aria',
+                      content: result.response,
+                      ts: Date.now(),
+                      node: nodeFromActor(ev.actor),
+                    }]
+                  })
+                  return
+                }
+              }
+            }
+          } catch {}
+          // Fallback — just clean up thinking bubble
+          setMsgs(prev => prev
+            .filter(m => m.id !== '__thinking__')
+            .map(m => m.streaming ? {...m, streaming: false} : m))
+          return
         }
 
         // Deduplicate
@@ -435,11 +465,32 @@ export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) 
           const sr = await fetch(`/api/result/${taskId}`)
           if (sr.ok) {
             const status = await sr.json()
-            if (status.status === 'complete' || status.status === 'error') {
-              // SSE may have missed done — clean up any streaming bubbles
+            if (status.status === 'complete' || status.status === 'revised') {
+              // SSE may have missed done — render response from poll
+              if (status.response) {
+                setMsgs(prev => {
+                  const withoutThinking = prev
+                    .filter(m => m.id !== '__thinking__')
+                    .map(m => m.streaming ? {...m, streaming: false} : m)
+                  return [...withoutThinking, {
+                    id: uid(), role: 'aria',
+                    content: status.response,
+                    ts: Date.now(),
+                  }]
+                })
+              } else {
+                setMsgs(prev => prev
+                  .filter(m => m.id !== '__thinking__')
+                  .map(m => m.streaming ? {...m, streaming: false} : m))
+              }
+              setPipelineDone(true)
+              break
+            }
+            if (status.status === 'error') {
               setMsgs(prev => prev
                 .filter(m => m.id !== '__thinking__')
-                .map(m => m.streaming ? {...m, streaming: false} : m))
+                .concat([{id:uid(), role:'aria', content: status.response || 'Something went wrong.', ts:Date.now()}]))
+              setPipelineDone(true)
               break
             }
           }
