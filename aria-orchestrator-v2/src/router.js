@@ -28,6 +28,12 @@ const COMPLEXITY_INDICATORS = {
     'distributed', 'concurrent', 'algorithm', 'system', 'integration',
     'incident', 'forensic', 'threat', 'vulnerability', 'compliance',
     'firewall', 'mtls', 'certificate', 'zero-trust', 'siem', 'soc',
+    // Infrastructure and provisioning
+    'proxmox', 'ssh', 'vm', 'vmid', 'hypervisor', 'provision', 'deploy',
+    'api', 'token', 'secret', 'credential', 'password', 'authentication',
+    'subnet', 'gateway', 'dns', 'ip', 'network', 'storage', 'disk',
+    'node', 'cluster', 'container', 'docker', 'kubernetes',
+    'create', 'boot', 'install', 'configure', 'setup',
   ],
   medium: [
     'implement', 'feature', 'add', 'update', 'modify', 'fix', 'test',
@@ -200,7 +206,7 @@ export class AriaRouter {
     if (conversational) return { intent: 'conversational', blastRadius: 'zero' };
 
     // Production-touching signals — high blast radius
-    const productionPatterns = /\b(production|prod|live|deploy|enforce|enable|disable|configure|change|modify|delete|remove|restart|reboot|rollback|firewall|mtls|tls|certificate|acl|policy|rule|access)\b/i;
+    const productionPatterns = /\b(production|prod|live|deploy|enforce|enable|disable|configure|change|modify|delete|remove|restart|reboot|rollback|firewall|mtls|tls|certificate|acl|policy|rule|access|proxmox|ssh|vm|provision|hypervisor|token|secret|password|credential|subnet|gateway|storage|disk|node|cluster|boot|install|setup)\b/i;
     const highBlast = productionPatterns.test(lower);
 
     // Stateful change signals — medium blast radius
