@@ -21,7 +21,7 @@ const INSTANCES = {
     symbol: 'α',
   },
   gamma: {
-    url:    process.env.GAMMA_OLLAMA_URL || 'http://192.168.1.9:11434',
+    url:    process.env.GAMMA_OLLAMA_URL || 'http://100.66.170.90:11434',
     model:  process.env.GAMMA_MODEL      || 'qwen3:14b',
     symbol: 'γ',
   },
