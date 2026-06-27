@@ -57,7 +57,7 @@ export async function callOllama(instanceName, {
   const start = Date.now()
 
   // Log what we're sending to Ollama
-  console.log(`[ollama] instance=${instanceName} model=${inst.model} messages=${messages.length} last=${JSON.stringify(messages[messages.length-1]?.content?.slice(0,80))}`)
+  console.log(`[ollama] instance=${instanceName} model=${inst.model} messages=${JSON.stringify(messages)}`)
 
   // Tool call loop — LLM may call tools multiple times before final response
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
