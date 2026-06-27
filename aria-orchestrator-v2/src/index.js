@@ -3,7 +3,7 @@
  *
  * Consumes: aria.requests
  * Produces: aria.results.tasks, aria.dlq
- * Writes:   Redis activity:{cid}, result:{task_id}, history:{cid}
+ * Writes:   Redis activity:{cid}, result:{task_id}
  *
  * Flow per message:
  *   1. Classify intent + blast radius (pure JS, sub-ms)
@@ -13,7 +13,6 @@
  *   5. If high blast radius → write confirmation-required to activity, wait
  *      (confirmation comes as a follow-up message on same CiD)
  *   6. Load system prompt (name) from Redis KV cache
- *   7. Load conversation history from Redis
  *   8. Call selected Ollama instance
  *   9. For actionable high-complexity responses — invoke validation pass
  *  10. Write result to Redis + Kafka
@@ -160,7 +159,7 @@ async function handleRequest(envelope) {
     const userMsg = buildUserMessage(message, displayName);
 
     // ── 6. Call selected Ollama instance ─────────────────────────────────────
-    console.log(`[orchestrator] routing=${routing.instance} model=${routing.instance} history=${history.length} msg=${userMsg.slice(0,60)}`);
+    console.log(`[orchestrator] routing=${routing.instance} model=${routing.instance} msg=${userMsg.slice(0,60)}`);
     await writeActivity(redis, {
       cid,
       taskId,
