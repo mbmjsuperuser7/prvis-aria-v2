@@ -231,11 +231,14 @@ export class AriaRouter {
     const { intent, blastRadius } = this.classifyIntent(message);
     const bucket = complexityBucket(score);
 
-    // Base scores — inverse relationship to complexity for beta, direct for alpha
+    // Base scores
+    // β only handles conversational — zero score if actionable
+    // γ handles moderate — preferred for actionable low complexity
+    // α handles complex — preferred for actionable high complexity
     const baseScores = {
-      alpha: Math.min(1, score * 1.5),
-      gamma: 1 - Math.abs(score - 0.5) * 2,
-      beta:  Math.max(0, 1 - score * 2),
+      alpha: intent === 'actionable' ? Math.min(1, score * 2.0) : Math.min(1, score * 0.5),
+      gamma: intent === 'actionable' ? Math.min(1, 0.6 + score) : 1 - Math.abs(score - 0.5) * 2,
+      beta:  intent === 'conversational' ? Math.max(0, 1 - score * 2) : 0,
     };
 
     // Circuit breaker — suppress failing instances
