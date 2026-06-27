@@ -42,6 +42,9 @@ const TOPIC_DLQ       = 'aria.dlq';
 
 // ── Clients ──────────────────────────────────────────────────────────────────
 
+// Suppress partitioner warning — expected in KafkaJS v2
+process.env.KAFKAJS_NO_PARTITIONER_WARNING = '1';
+
 const kafka = new Kafka({
   clientId: 'aria-orchestrator-v2',
   brokers:  [KAFKA_BOOTSTRAP],
@@ -328,7 +331,7 @@ async function main() {
   console.log('[orchestrator] Kafka producer connected');
 
   await consumer.connect();
-  await consumer.subscribe({ topic: TOPIC_REQUESTS, fromBeginning: false });
+  await consumer.subscribe({ topic: TOPIC_REQUESTS, fromBeginning: true });
   console.log(`[orchestrator] Consuming ${TOPIC_REQUESTS}`);
 
   await consumer.run({
