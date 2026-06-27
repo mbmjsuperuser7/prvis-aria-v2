@@ -40,7 +40,6 @@ const MAX_TOOL_ROUNDS   = 5  // max tool call iterations before forcing a final 
  * Handles the tool call loop — LLM calls tools, gets results, continues until final response.
  */
 export async function callOllama(instanceName, {
-  systemPrompt,
   history,
   message,
   toolContext,   // { cid, taskId, redis, symbol } — needed for tool execution
@@ -68,7 +67,7 @@ export async function callOllama(instanceName, {
       options:  { temperature: 0.7, num_ctx: 8192 },
     }
 
-    if (systemPrompt) body.system = systemPrompt
+    // Identity baked into modelfile — no system prompt injection needed
 
     const controller = new AbortController()
     const timeout    = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS)
@@ -154,17 +153,6 @@ export async function callOllama(instanceName, {
   }
 }
 
-/**
- * Load system prompt (name only) for an instance from Redis KV cache.
- * Written by aria-ccf at startup and every 4 hours.
- */
-export async function loadSystemPrompt(redis, instanceName) {
-  try {
-    return await redis.get(`ccf:system:${instanceName}`) || ''
-  } catch {
-    return ''
-  }
-}
 
 /**
  * Load first name for a session — set by aria-ccf on first message only.

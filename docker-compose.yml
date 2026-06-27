@@ -121,11 +121,11 @@ services:
       REDIS_URL:         "redis://aria-redis:6379/0"
       KAFKA_BOOTSTRAP:   "aria-kafka:9092"
       ALPHA_OLLAMA_URL:  ${ALPHA_URL:-http://192.168.1.9:11434}
-      ALPHA_MODEL:       ${ALPHA_MODEL:-qwen3:30b-a3b}
+      ALPHA_MODEL:       ${ALPHA_MODEL:-aria-alpha}
       GAMMA_OLLAMA_URL:  ${GAMMA_URL:-http://100.66.170.90:11434}
-      GAMMA_MODEL:       ${GAMMA_MODEL:-qwen3:14b}
+      GAMMA_MODEL:       ${GAMMA_MODEL:-aria-gamma}
       BETA_OLLAMA_URL:   ${BETA_URL:-http://192.168.1.9:11434}
-      BETA_MODEL:        ${BETA_MODEL:-qwen3:8b}
+      BETA_MODEL:        ${BETA_MODEL:-aria-beta}
       OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
       ROUTER_STATE_PATH: ".swarm/aria-router-state.json"
       RAG_URL:           "http://aria-rag:8300"
@@ -155,27 +155,15 @@ services:
     container_name: aria-ccf
     hostname: aria-ccf
     environment:
-      REDIS_URL:           "redis://aria-redis:6379/0"
-      KAFKA_BOOTSTRAP:     "aria-kafka:9092"
-      CCF_DIR:             "/app/ccf"
-      ALPHA_OLLAMA_URL:    ${ALPHA_URL:-http://192.168.1.9:11434}
-      ALPHA_MODEL:         ${ALPHA_MODEL:-qwen3:30b-a3b}
-      GAMMA_OLLAMA_URL:    ${GAMMA_URL:-http://100.66.170.90:11434}
-      GAMMA_MODEL:         ${GAMMA_MODEL:-qwen3:14b}
-      BETA_OLLAMA_URL:     ${BETA_URL:-http://192.168.1.9:11434}
-      BETA_MODEL:          ${BETA_MODEL:-qwen3:8b}
-      CCF_REFRESH_SECONDS: "14400"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      REDIS_URL:       "redis://aria-redis:6379/0"
+      KAFKA_BOOTSTRAP: "aria-kafka:9092"
     depends_on:
       redis: {condition: service_healthy}
       kafka: {condition: service_healthy}
     deploy:
       resources:
-        limits: {memory: 128M, cpus: "0.25"}
+        limits: {memory: 64M, cpus: "0.1"}
     networks: [aria-internal]
-
-  # ── aria-audit — Presidio anonymization, ACiDF writer ────────────────────────
   aria-audit:
     <<: *defaults
     build: {context: ./aria-audit}

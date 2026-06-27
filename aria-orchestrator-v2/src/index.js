@@ -25,7 +25,7 @@
 import { Kafka, logLevel } from 'kafkajs';
 import Redis from 'ioredis';
 import { router } from './router.js';
-import { callOllama, loadSystemPrompt, loadSessionFirstName } from './ollama.js';
+import { callOllama, loadSessionFirstName } from './ollama.js';
 import { writeActivity, writeRoutingDecision, writeToolResult, writeResult } from './activity.js';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -169,10 +169,7 @@ async function handleRequest(envelope) {
       return;
     }
 
-    // ── 4. Load system prompt (name only — from KV cache) ───────────────────
-    const systemPrompt = await loadSystemPrompt(redis, routing.instance);
-
-    // ── 5. Load conversation history ─────────────────────────────────────────
+    // ── 4. Load conversation history ─────────────────────────────────────────
     const history  = await loadHistory(cid);
     // displayName is non-empty only on first message (set by aria-ccf)
     const isFirst  = !!displayName;
@@ -190,7 +187,6 @@ async function handleRequest(envelope) {
 
     // LLM has knowledge_search in its tool list — calls it when it needs context
     const llmResult = await callOllama(routing.instance, {
-      systemPrompt,
       history,
       message: userMsg,
       toolContext: { cid, taskId, redis, symbol: routing.symbol },
@@ -214,8 +210,6 @@ async function handleRequest(envelope) {
       // Validation goes to whichever instance the bandit rates highest for
       // validation tasks — not hardcoded to gamma
       const validationInstance = routing.instance === 'alpha' ? 'gamma' : 'alpha';
-      const validationPrompt   = await loadSystemPrompt(redis, validationInstance);
-
       await writeActivity(redis, {
         cid,
         taskId,
@@ -228,7 +222,6 @@ async function handleRequest(envelope) {
       const validationMsg = `Is this response safe and accurate? Reply APPROVED or REJECTED: [reason].\n\n${llmResult.content.slice(0, 500)}`;
 
       const validation = await callOllama(validationInstance, {
-        systemPrompt: validationPrompt,
         history:      [],
         message:      validationMsg,
       });
