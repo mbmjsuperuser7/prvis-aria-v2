@@ -1,4 +1,5 @@
 'use client'
+import { sendMessage } from '@/app/actions/chat'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -299,7 +300,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     sseConnectedCid.current = cid
     nodeBubbleIds.current = {}  // reset per pipeline run
 
-    const es = new EventSource(`${apiUrl}/v1/activity/${cid}/stream`)
+    const es = new EventSource(`/api/activity/${cid}`)
     es.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data)
@@ -385,7 +386,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     for (const f of Array.from(files)) {
       try {
         const fd = new FormData(); fd.append('file', f); fd.append('customer_id', customerId)
-        const r = await fetch(`${apiUrl}/v1/ingest/upload`, { method: 'POST', body: fd })
+        const r = await fetch(`/api/upload`, { method: 'POST', body: fd })
         if (r.ok) names.push(f.name)
         else names.push(f.name) // still show even if backend not wired yet
       } catch { names.push(f.name) }
@@ -417,25 +418,17 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     connectSSE(cid)
 
     try {
-      const r = await fetch(`${apiUrl}/v1/chat`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          message:    msg,
-          cid:        cid,
-          username:   customerId,
-          write_mode: writeMode,   // captured at send time — Alpha knows upfront
-        })
+      const enqueued = await sendMessage({
+        message: msg,
+        cid,
+        persona: writeMode ? 'security_engineer' : undefined,
       })
 
-      if (!r.ok) {
-        const err = await r.text()
-        throw new Error(`HTTP ${r.status}: ${err}`)
+      if (enqueued.status === 'error' || !enqueued.task_id) {
+        throw new Error(enqueued.error || 'Message delivery failed')
       }
 
-      const enqueued = await r.json()
       const taskId = enqueued.task_id
-      if (!taskId) throw new Error('No task_id returned')
 
       // Wait for pipeline to complete (SSE drives the bubbles, we just wait for done signal)
       const deadline = Date.now() + 300_000
@@ -444,7 +437,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
         if (pipelineDone) break
         // Fallback: poll status in case SSE missed done event
         try {
-          const sr = await fetch(`${apiUrl}/v1/status/${taskId}`)
+          const sr = await fetch(`/api/result/${taskId}`)
           if (sr.ok) {
             const status = await sr.json()
             if (status.status === 'complete' || status.status === 'error') {
