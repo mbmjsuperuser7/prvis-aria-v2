@@ -38,8 +38,6 @@ const DEDUP_TTL_MS = 60_000; // forget after 60 seconds
 const REDIS_URL       = process.env.REDIS_URL       || 'redis://aria-redis:6379/0';
 const MAX_RETRIES     = 3;
 const RESULT_TTL      = 86400;
-const HISTORY_MAX     = 20;
-
 const TOPIC_REQUESTS  = 'aria.requests';
 const TOPIC_RESULTS   = 'aria.results.tasks';
 const TOPIC_DLQ       = 'aria.dlq';
@@ -87,33 +85,9 @@ async function produce(topic, cid, taskId, payload, retry = 0) {
   });
 }
 
-async function loadHistory(cid) {
-  const raw = await redis.lrange(`history:${cid}`, 0, HISTORY_MAX * 2);
-  const turns = [];
-  for (const r of raw) {
-    try {
-      const t = JSON.parse(r);
-      if (t.role === 'user' || t.role === 'assistant') {
-        turns.push({ role: t.role, content: t.content });
-      }
-    } catch { /* skip malformed */ }
-  }
-  return turns;
-}
-
-async function appendHistory(cid, role, content) {
-  const entry = JSON.stringify({ role, content, ts: new Date().toISOString() });
-  await redis.rpush(`history:${cid}`, entry);
-  await redis.expire(`history:${cid}`, RESULT_TTL);
-}
-
-function isFirstMessage(history) {
-  return !history || history.length === 0;
-}
-
-function buildUserMessage(message, firstName, isFirst) {
-  // Agreed prompt contract: first name only on first message, nothing else added
-  if (isFirst && firstName && firstName !== 'default-user') {
+function buildUserMessage(message, firstName) {
+  // Agreed prompt contract: first name on first message only
+  if (firstName && firstName !== 'default-user') {
     return `${firstName}: ${message}`;
   }
   return message;
@@ -181,11 +155,9 @@ async function handleRequest(envelope) {
       return;
     }
 
-    // ── 4. Load conversation history ─────────────────────────────────────────
-    const history  = await loadHistory(cid);
-    // displayName is non-empty only on first message (set by aria-ccf)
-    const isFirst  = !!displayName;
-    const userMsg  = buildUserMessage(message, displayName, isFirst);
+    // ── 4. Build user message ─────────────────────────────────────────────────
+    // First name prepended on first message only (set by aria-ccf, absent after)
+    const userMsg = buildUserMessage(message, displayName);
 
     // ── 6. Call selected Ollama instance ─────────────────────────────────────
     console.log(`[orchestrator] routing=${routing.instance} model=${routing.instance} history=${history.length} msg=${userMsg.slice(0,60)}`);
@@ -199,7 +171,6 @@ async function handleRequest(envelope) {
 
     // LLM has knowledge_search in its tool list — calls it when it needs context
     const llmResult = await callOllama(routing.instance, {
-      history,
       message: userMsg,
       toolContext: { cid, taskId, redis, symbol: routing.symbol },
     });
@@ -234,8 +205,7 @@ async function handleRequest(envelope) {
       const validationMsg = `Is this response safe and accurate? Reply APPROVED or REJECTED: [reason].\n\n${llmResult.content.slice(0, 500)}`;
 
       const validation = await callOllama(validationInstance, {
-        history:      [],
-        message:      validationMsg,
+        message: validationMsg,
       });
 
       validationPassed = validation.content.trim().toUpperCase().startsWith('APPROVED');
@@ -255,11 +225,7 @@ async function handleRequest(envelope) {
       }
     }
 
-    // ── 9. Append to conversation history ────────────────────────────────────
-    await appendHistory(cid, 'user', message);
-    await appendHistory(cid, 'assistant', finalResponse);
-
-    // ── 10. Write result ─────────────────────────────────────────────────────
+    // ── 9. Write result ─────────────────────────────────────────────────────
     const status = validationPassed ? 'complete' : 'revised';
     await writeResult(redis, {
       cid,

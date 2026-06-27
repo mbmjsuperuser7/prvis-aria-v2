@@ -40,19 +40,14 @@ const MAX_TOOL_ROUNDS   = 5  // max tool call iterations before forcing a final 
  * Handles the tool call loop — LLM calls tools, gets results, continues until final response.
  */
 export async function callOllama(instanceName, {
-  history,
   message,
   toolContext,   // { cid, taskId, redis, symbol } — needed for tool execution
 }) {
   const inst = INSTANCES[instanceName]
   if (!inst) throw new Error(`Unknown instance: ${instanceName}`)
 
-  // Build initial messages
-  const messages = []
-  if (history?.length) {
-    messages.push(...history.map(t => ({ role: t.role, content: t.content })))
-  }
-  messages.push({ role: 'user', content: message })
+  // Prompt contract: user message only. No history padding.
+  const messages = [{ role: 'user', content: message }]
 
   const start = Date.now()
 
