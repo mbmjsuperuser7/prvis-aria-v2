@@ -13,7 +13,7 @@ type Msg = {
 }
 type ActivityEvent = { actor: string; event: string; detail: string; ts: string }
 type ChatSession = { id: string; title: string; preview: string; ts: number; msgs: Msg[] }
-type Props = { customerId: string; apiUrl: string; healthUrl?: string; mode?: 'widget'|'panel'|'full' }
+type Props = { customerId: string; healthUrl?: string; mode?: 'widget'|'panel'|'full' }
 
 // ── Design tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -114,8 +114,7 @@ const I = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10)
 
-function generateCiD(username: string): string {
-  const ucid = Array.from({length: 20}, () => Math.floor(Math.random() * 10)).join('')
+, () => Math.floor(Math.random() * 10)).join('')
   let hash = 0
   for (let i = 0; i < (username + ':prvis').length; i++)
     hash = ((hash << 5) - hash) + (username + ':prvis').charCodeAt(i)
@@ -233,7 +232,7 @@ function renderInline(text: string) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }: Props) {
+export default function AriaChat({ customerId, healthUrl, mode='full' }: Props) {
   const [histOpen,     setHistOpen]     = useState(true)
   const [actOpen,      setActOpen]      = useState(true)
   const [sessions,     setSessions]     = useState<ChatSession[]>([])
@@ -254,7 +253,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
   const [urlInput,     setUrlInput]     = useState('')
   const [listening,    setListening]    = useState(false)
 
-  const cidRef       = useRef<string>(generateCiD(customerId))
+  const cidRef       = useRef<string>('')  // assigned by server action on first message
   const bottomRef    = useRef<HTMLDivElement>(null)
   const inputRef     = useRef<HTMLTextAreaElement>(null)
   const actBottomRef = useRef<HTMLDivElement>(null)
@@ -392,7 +391,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
       } catch { names.push(f.name) }
     }
     setUploads(prev => [...prev, ...names]); setUploading(false)
-  }, [apiUrl, customerId])
+  }, [customerId])
 
   // url attach
   const handleUrl = useCallback(async () => {
@@ -420,13 +419,16 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     try {
       const enqueued = await sendMessage({
         message: msg,
-        cid,
+        cid: cidRef.current || undefined,
         persona: writeMode ? 'security_engineer' : undefined,
       })
 
       if (enqueued.status === 'error' || !enqueued.task_id) {
         throw new Error(enqueued.error || 'Message delivery failed')
       }
+
+      // Store CiD returned by server — all subsequent messages use same CiD
+      if (enqueued.cid) cidRef.current = enqueued.cid
 
       const taskId = enqueued.task_id
 
@@ -459,7 +461,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     }
 
     setSending(false); inputRef.current?.focus()
-  }, [input, sending, apiUrl, customerId, writeMode, uploads, pipelineDone])
+  }, [input, sending, customerId, writeMode, uploads, pipelineDone])
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send() }
@@ -469,7 +471,7 @@ export default function AriaChat({ customerId, apiUrl, healthUrl, mode='full' }:
     if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
     sseConnectedCid.current = ''
     seenEvents.current.clear()
-    cidRef.current = generateCiD(customerId)
+    cidRef.current = ''  // reset — server action assigns new CiD on next message
     setActiveId(uid()); setMsgs([]); setUploads([]); setActivity([]); setPipelineDone(true)
     inputRef.current?.focus()
   }

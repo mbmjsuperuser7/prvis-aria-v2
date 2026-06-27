@@ -54,15 +54,11 @@ BETA_OLLAMA_URL   = os.getenv("BETA_OLLAMA_URL",    "http://192.168.1.9:11434")
 BETA_MODEL        = os.getenv("BETA_MODEL",         "qwen3:8b")
 
 # Topics to consume — ALL topics
+# v2 topics only — stale v1 topics removed
 TOPICS = [
-    "aria.requests",
-    "aria.plans",
-    "aria.execution.steps",
-    "aria.results.steps",
-    "aria.results.tasks",   # v2 orchestrator writes here — includes symbol/routing fields
-    "aria.responses",
-    "aria.sandbox.execution",
-    "aria.dlq",
+    "aria.requests",       # UI → orchestrator
+    "aria.results.tasks",  # orchestrator → result (includes α/γ/β routing fields)
+    "aria.dlq",            # dead letter queue
 ]
 
 # Topics that are NEVER written to disk — dropped entirely
